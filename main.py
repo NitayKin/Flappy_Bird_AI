@@ -17,12 +17,11 @@ class FlappyBirdEnvironment(gym.Env):
         reward = 5
         self.client_socket.send(struct.pack('i', action))
         data = self.client_socket.recv(1024)
-        print(data)
         values = struct.unpack('ffff', data)
-        return [data[0], data[1], data[2]], reward, data[4]
+        return [values[0], values[1], values[2]], reward, values[3]
 
     def reset(self):
-        # subprocess.run("./Game")
+        subprocess.Popen(["./Game"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=os.getcwd())
         self.client_socket, _ = server_socket.accept()
 
 
@@ -45,7 +44,7 @@ class DQNAgent:
         return model
 
     def choose_action(self, state):
-        return 1
+        return 0
 
     def train(self, state, action, next_state, reward, done):
         # Implement the agent's training process using Q-learning
@@ -57,15 +56,15 @@ class DQNAgent:
 def train_agent(env, agent, num_episodes=1000, batch_size=32, target_update_freq=100):
     for episode in range(num_episodes):
         state = env.reset()
-        done = False
+        done = 0.0
         total_reward = 0
 
-        while not done:
+        while done == 0.0:
             # Choose action using the agent's policy
             action = agent.choose_action(state)
 
             # Take a step in the environment
-            next_state, reward, done, _ = env.step(action)
+            next_state, reward, done = env.step(action)
 
             # Update the agent's Q-function and train the DQN model
             agent.train(state, action, next_state, reward, done)
