@@ -1,3 +1,5 @@
+from itertools import islice
+
 import numpy as np
 import tensorflow as tf
 import gym
@@ -19,6 +21,7 @@ from tensorflow.keras.optimizers import Adam
 from datetime import datetime
 from gym.spaces import Discrete, Box
 
+g_counter = 0
 
 def build_agent(model, nb_actions):
     memory = SequentialMemory(limit=1000000, window_length=1)
@@ -52,57 +55,51 @@ def build_model(nb_states, nb_actions):
 # Define the Flappy Bird game environment using OpenAI Gym
 class FlappyBirdEnvironment(gym.Env):
     def __init__(self):
-        self.last_y = 0
+        self.last_distance_Y_from_middle = 0
+        self.last_score = 0
         self.client_socket = 0
         self.action_space = Discrete(2)
-        self.observation_space = Box(low=0, high=200, shape=(1, 5))
+        self.observation_space = Box(low=0, high=200, shape=(1, 4))
 
     def step(self, action):
         self.client_socket.send(struct.pack('i', action))
         data = self.client_socket.recv(1024)
-        values = struct.unpack('ffffff', data)
-        reward = 0
-        print(values)
-        print()
+        values = struct.unpack('fffff', data)
+        velocity = values[0]
+        bird_y_coordinate = values[1]
+        gap_y_coordinate = values[2]
+        score = values[3]
+        is_done = values[4]
 
-        if values[3] < 720/2 and values[3]-self.last_y >0.0:
-            print ("!!!!!!!!!!!!!!!!!!!!!!!!")
-            reward += 100
-        if values[3] > 720 / 2 and values[3] - self.last_y < 0.0:
-            print ("!!!!!!!!!!!!!!!!!!!!!!!!")
-            reward += 100
-        if abs(values[1] - values[2]) < 25:
-            reward += 100
-        elif abs(values[1] - values[2]) < 45:
-            reward += 50
-        elif abs(values[1] - values[2]) < 65:
-            reward += 20
-        # elif values[5] == 1.0:
-        #     reward = -100
+        reward = 20*(score-self.last_score)
+        if abs(bird_y_coordinate-gap_y_coordinate) > self.last_distance_Y_from_middle:
+            reward -= 10
         else:
-            reward = -50
+            reward += 10
 
-        if abs(values[3]) < 100:
-            reward -= 100
-        else:
-            reward += 100
-        if abs(values[4]) < 100:
-            reward -= 100
-        else:
-            reward += 100
+        if abs(bird_y_coordinate - gap_y_coordinate) > 50:
+            reward -= 10
+        if is_done:
+            reward = -1000
 
-        self.last_y = values[3]
-        return (values[0], values[1], values[2], values[3], values[4]), reward, values[5], {}
+        self.last_distance_Y_from_middle = abs(bird_y_coordinate-gap_y_coordinate)
+        self.last_score = score
+        return (velocity, bird_y_coordinate, gap_y_coordinate, score), reward, is_done, {}
 
     def reset(self):
-        subprocess.Popen(["./Game"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         cwd=os.getcwd())
+        global g_counter
+        self.last_distance_Y_from_middle = 0
+        self.last_score = 0
+        g_counter += 1
+        if g_counter == 5:
+            subprocess.Popen(["./Game_GUI"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             cwd=os.getcwd())
+            g_counter = 0
+        else:
+            subprocess.Popen(["./Game"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            cwd=os.getcwd())
         self.client_socket, _ = server_socket.accept()
-        return -9.841968536376953, 1021.2803955078125, 1147.7086181640625, 0.0, 720.0
-
-
-    # def choose_action(self, state):
-    #     return 0 if random.uniform(0, 1) > 0.05 else 1
+        return 9.845905303955078, 360.0, 360.0, 0
 
 
 # Main function to run the Flappy Bird game and train the agent
@@ -125,6 +122,12 @@ if __name__ == "__main__":
 
     # Create the agent
     model = build_model(state_shape, action_space)
+    checkpoint_path = './checkpoints/checkpoint'
+    if os.path.exists(checkpoint_path):
+        model.load_weights(tf.train.latest_checkpoint('./checkpoints'))
+        print("using saved model")
+    else:
+        print("creating new model")
     model.summary()
 
     dqn = build_agent(model, action_space)
@@ -132,6 +135,5 @@ if __name__ == "__main__":
     fit = True
     if fit:
         dqn.fit(env, nb_steps=50000, visualize=False, verbose=1)
-        date_time = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
-        dqn.save_weights(r'checkpoints/%s/dqn_weights.h5f' % date_time, overwrite=True)
+        dqn.save_weights(r'checkpoints/final.h5f', overwrite=True)
     server_socket.close()
