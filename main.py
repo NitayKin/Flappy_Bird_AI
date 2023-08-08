@@ -22,6 +22,7 @@ from datetime import datetime
 from gym.spaces import Discrete, Box
 
 g_counter = 0
+base_velocity = 9.842
 
 def build_agent(model, nb_actions):
     memory = SequentialMemory(limit=1000000, window_length=1)
@@ -55,7 +56,7 @@ def build_model(nb_states, nb_actions):
 # Define the Flappy Bird game environment using OpenAI Gym
 class FlappyBirdEnvironment(gym.Env):
     def __init__(self):
-        self.last_distance_Y_from_middle = 0
+        self.last_distance_y_from_middle = 0
         self.last_score = 0
         self.client_socket = 0
         self.action_space = Discrete(2)
@@ -64,31 +65,55 @@ class FlappyBirdEnvironment(gym.Env):
     def step(self, action):
         self.client_socket.send(struct.pack('i', action))
         data = self.client_socket.recv(1024)
-        values = struct.unpack('fffff', data)
-        velocity = values[0]
+        values = struct.unpack('ffffff', data)
+        velocity = abs(values[0])
         bird_y_coordinate = values[1]
         gap_y_coordinate = values[2]
         score = values[3]
-        is_done = values[4]
+        gap_length = values[4]
+        is_done = values[5]
+        reward = 0.0
 
-        reward = 20*(score-self.last_score)
-        if abs(bird_y_coordinate-gap_y_coordinate) > self.last_distance_Y_from_middle:
-            reward -= 10
+        if abs(bird_y_coordinate - gap_y_coordinate) > gap_length / 6.0:
+            if bird_y_coordinate > gap_y_coordinate:
+                if not action:
+                    reward -= ((10*velocity) / base_velocity) * 40.0
+                else:
+                    reward += 10
+            if bird_y_coordinate < gap_y_coordinate:
+                if action:
+                    reward -= ((10*velocity) / base_velocity) * 400.0 #bigger penalty for jumping when falling - becuase jumping resets the velocity downwords, which ruins big gap placement difference
+                else:
+                    reward += 10
         else:
-            reward += 10
+            reward += 100.0
 
-        if abs(bird_y_coordinate - gap_y_coordinate) > 50:
-            reward -= 10
-        if is_done:
-            reward = -1000
 
-        self.last_distance_Y_from_middle = abs(bird_y_coordinate-gap_y_coordinate)
+        # if abs(bird_y_coordinate - gap_y_coordinate) > self.last_distance_y_from_middle:
+        #     reward = -10
+        # else:
+        #     reward += 10
+
+        # if bird_y_coordinate < (gap_y_coordinate-(gap_length / 4.0)) and action:
+        #     reward = -10
+        # else:
+        #     reward += 10
+        #
+        # if bird_y_coordinate > (gap_y_coordinate+(gap_length / 4.0)) and not action:
+        #     reward = -10
+        # else:
+        #     reward += 10
+
+        # if is_done:
+        #     reward = -1000
+
+        self.last_distance_y_from_middle = abs(bird_y_coordinate - gap_y_coordinate)
         self.last_score = score
-        return (velocity, bird_y_coordinate, gap_y_coordinate, score), reward, is_done, {}
+        return (bird_y_coordinate, gap_y_coordinate, gap_length, velocity), reward, is_done, {}
 
     def reset(self):
         global g_counter
-        self.last_distance_Y_from_middle = 0
+        self.last_distance_y_from_middle = 0
         self.last_score = 0
         g_counter += 1
         if g_counter == 5:
@@ -99,7 +124,7 @@ class FlappyBirdEnvironment(gym.Env):
             subprocess.Popen(["./Game"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             cwd=os.getcwd())
         self.client_socket, _ = server_socket.accept()
-        return 9.845905303955078, 360.0, 360.0, 0
+        return 380.0, 360.0, 390.0, base_velocity
 
 
 # Main function to run the Flappy Bird game and train the agent
